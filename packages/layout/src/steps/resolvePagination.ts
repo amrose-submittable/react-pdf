@@ -1,9 +1,6 @@
-/* eslint-disable no-use-before-define */
-/* eslint-disable no-continue */
-/* eslint-disable prefer-destructuring */
-
 import * as P from '@react-pdf/primitives';
-import { isNil, omit, compose } from '@react-pdf/fns';
+import { omit, compose } from '@react-pdf/fns';
+import FontStore from '@react-pdf/font';
 
 import isFixed from '../node/isFixed';
 import splitText from '../text/splitText';
@@ -17,20 +14,33 @@ import resolveTextLayout from './resolveTextLayout';
 import resolveInheritance from './resolveInheritance';
 import { resolvePageDimensions } from './resolveDimensions';
 import { resolvePageStyles } from './resolveStyles';
+import {
+    DynamicPageProps,
+    SafeDocumentNode,
+    SafeLinkNode,
+    SafeNode,
+    SafePageNode,
+    SafeTextNode,
+    SafeViewNode,
+    YogaInstance,
+} from '../types';
 
-const isText = (node) => node.type === P.Text;
+const isText = (node: SafeNode): node is SafeTextNode => node.type === P.Text;
 
 // Prevent splitting elements by low decimal numbers
 const SAFETY_THRESHOLD = 0.001;
 
-const assingChildren = (children, node) =>
+const assingChildren = <T>(children: SafeNode[], node: T): T =>
     Object.assign({}, node, { children });
 
-const getTop = (node) => node.box?.top || 0;
+const getTop = (node: SafeNode) => node.box?.top || 0;
 
-const allFixed = (nodes) => nodes.every(isFixed);
+const allFixed = (nodes: SafeNode[]) => nodes.every(isFixed);
 
-const isDynamic = (node) => !isNil(node.props?.render);
+const isDynamic = (
+    node: SafeNode,
+): node is SafeLinkNode | SafeTextNode | SafeViewNode =>
+    node.props && 'render' in node.props;
 
 const relayoutPage = compose(
     resolveTextLayout,
@@ -39,15 +49,15 @@ const relayoutPage = compose(
     resolvePageStyles,
 );
 
-const warnUnavailableSpace = (node) => {
+const warnUnavailableSpace = (node: SafeNode) => {
     console.warn(
         `Node of type ${node.type} can't wrap between pages and it's bigger than available page height`,
     );
 };
 
-const splitNodes = (height, contentArea, nodes) => {
-    const currentChildren = [];
-    const nextChildren = [];
+const splitNodes = (height: number, contentArea: number, nodes: SafeNode[]) => {
+    const currentChildren: SafeNode[] = [];
+    const nextChildren: SafeNode[] = [];
 
     for (let i = 0; i < nodes.length; i += 1) {
         const child = nodes[i];
@@ -128,13 +138,13 @@ const splitNodes = (height, contentArea, nodes) => {
     return [currentChildren, nextChildren];
 };
 
-const splitChildren = (height, contentArea, node) => {
+const splitChildren = (height: number, contentArea: number, node: SafeNode) => {
     const children = node.children || [];
     const availableHeight = height - getTop(node);
     return splitNodes(availableHeight, contentArea, children);
 };
 
-const splitView = (node, height, contentArea) => {
+const splitView = (node: SafeNode, height: number, contentArea: number) => {
     const [currentNode, nextNode] = splitNode(node, height);
     const [currentChilds, nextChildren] = splitChildren(
         height,
@@ -148,24 +158,27 @@ const splitView = (node, height, contentArea) => {
     ];
 };
 
-const split = (node, height, contentArea) =>
+const split = (node: SafeNode, height: number, contentArea: number) =>
     isText(node) ? splitText(node, height) : splitView(node, height, contentArea);
 
-const shouldResolveDynamicNodes = (node) => {
+const shouldResolveDynamicNodes = (node: SafeNode) => {
     const children = node.children || [];
     return isDynamic(node) || children.some(shouldResolveDynamicNodes);
 };
 
-const resolveDynamicNodes = (props, node) => {
+const resolveDynamicNodes = (props: DynamicPageProps, node: SafeNode) => {
     const isNodeDynamic = isDynamic(node);
 
     // Call render prop on dynamic nodes and append result to children
     const resolveChildren = (children = []) => {
         if (isNodeDynamic) {
             const res = node.props.render(props);
-            return createInstances(res)
-                .filter(Boolean)
-                .map((n) => resolveDynamicNodes(props, n));
+            return (
+                createInstances(res)
+                    .filter(Boolean)
+                    // @ts-expect-error rework dynamic nodes. conflicting types
+                    .map((n) => resolveDynamicNodes(props, n))
+            );
         }
 
         return children.map((c) => resolveDynamicNodes(props, c));
@@ -176,12 +189,19 @@ const resolveDynamicNodes = (props, node) => {
     const box = resetHeight ? { ...node.box, height: 0 } : node.box;
 
     const children = resolveChildren(node.children);
+
+    // @ts-expect-error handle text here specifically
     const lines = isNodeDynamic ? null : node.lines;
 
     return Object.assign({}, node, { box, lines, children });
 };
 
-const resolveDynamicPage = (props, page, fontStore, yoga) => {
+const resolveDynamicPage = (
+    props: DynamicPageProps,
+    page: SafePageNode,
+    fontStore: FontStore,
+    yoga: YogaInstance,
+) => {
     if (shouldResolveDynamicNodes(page)) {
         const resolvedPage = resolveDynamicNodes(props, page);
         return relayoutPage(resolvedPage, fontStore, yoga);
@@ -190,7 +210,12 @@ const resolveDynamicPage = (props, page, fontStore, yoga) => {
     return page;
 };
 
-const splitPage = (page, pageNumber, fontStore, yoga) => {
+const splitPage = (
+    page: SafePageNode,
+    pageNumber: number,
+    fontStore: FontStore,
+    yoga: YogaInstance,
+): SafePageNode[] => {
     const wrapArea = getWrapArea(page);
     const contentArea = getContentArea(page);
     const dynamicPage = resolveDynamicPage({ pageNumber }, page, fontStore, yoga);
@@ -202,7 +227,9 @@ const splitPage = (page, pageNumber, fontStore, yoga) => {
         dynamicPage.children,
     );
 
-    const relayout = (node) => relayoutPage(node, fontStore, yoga);
+    const relayout = (node: SafePageNode): SafePageNode =>
+        // @ts-expect-error rework pagination
+        relayoutPage(node, fontStore, yoga) as SafePageNode;
 
     const currentBox = { ...page.box, height };
     const currentPage = relayout(
@@ -251,7 +278,12 @@ const dissocSubPageData = (page) => {
     return omit(['subPageNumber', 'subPageTotalPages'], page);
 };
 
-const paginate = (page, pageNumber, fontStore, yoga) => {
+const paginate = (
+    page: SafePageNode,
+    pageNumber: number,
+    fontStore: FontStore,
+    yoga: YogaInstance,
+) => {
     if (!page) return [];
 
     if (page.props?.wrap === false) return [page];
@@ -280,17 +312,20 @@ const paginate = (page, pageNumber, fontStore, yoga) => {
  * Performs pagination. This is the step responsible of breaking the whole document
  * into pages following pagiation rules, such as `fixed`, `break` and dynamic nodes.
  *
- * @param {Object} doc node
- * @param {Object} fontStore font store
- * @returns {Object} layout node
+ * @param root - Document node
+ * @param fontStore - Font store
+ * @returns Layout node
  */
-const resolvePagination = (doc, fontStore) => {
+const resolvePagination = (
+    root: SafeDocumentNode,
+    fontStore: FontStore,
+): SafeDocumentNode => {
     let pages = [];
     let pageNumber = 1;
 
-    for (let i = 0; i < doc.children.length; i += 1) {
-        const page = doc.children[i];
-        let subpages = paginate(page, pageNumber, fontStore, doc.yoga);
+    for (let i = 0; i < root.children.length; i += 1) {
+        const page = root.children[i];
+        let subpages = paginate(page, pageNumber, fontStore, root.yoga);
 
         subpages = assocSubPageData(subpages);
         pageNumber += subpages.length;
@@ -298,10 +333,10 @@ const resolvePagination = (doc, fontStore) => {
     }
 
     pages = pages.map((...args) =>
-        dissocSubPageData(resolvePageIndices(fontStore, doc.yoga, ...args)),
+        dissocSubPageData(resolvePageIndices(fontStore, root.yoga, ...args)),
     );
 
-    return assingChildren(pages, doc);
+    return assingChildren(pages, root);
 };
 
 export default resolvePagination;
