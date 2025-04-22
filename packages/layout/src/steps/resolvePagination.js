@@ -108,7 +108,7 @@ const splitNodes = (height, contentArea, nodes) => {
                 const box = Object.assign({}, child.box, {
                     top: child.box.top - height,
                 });
-                const next = Object.assign({}, child, { box });
+                const next = Object.assign({}, nextChild, { box });
 
                 currentChildren.push(...futureFixedNodes);
                 nextChildren.push(next, ...futureNodes);

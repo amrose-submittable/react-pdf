@@ -34,7 +34,7 @@
   "dependencies": {
     "@babel/runtime": "^7.20.13",
     "@react-pdf/font": "^2.5.2",
-    "@react-pdf/layout": "^3.13.0",
+    "@react-pdf/layout": "https://github.com/amrose-submittable/react-pdf/releases/download/layout-submittable/react-pdf-layout-3.13.0.tgz",
     "@react-pdf/pdfkit": "^3.2.0",
     "@react-pdf/primitives": "^3.1.1",
     "@react-pdf/render": "^3.5.0",
